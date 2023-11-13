@@ -114,7 +114,19 @@ with Katapult again.
    python3 flashtool.py -d <serial device> -b <baud_rate>
    ```
    Replace `<serial_device>` the the path to the USB/UART device you wish to
-   flash.  The `<baud_rate>` is only necessary for UART devices, and defaults
+   flash.
+
+   For TBU devices:
+   ```
+   cd ~/katapult/scripts
+   python3 flashtool.py -a <tcp host> -p <tcp port> -c <tbu serial channel> -b <baud_rate>
+   ```
+   Replace `<tcp host>` with the appropriate hostname or IPAddress for your TBU
+   device.  Replace `<tcp port>` with the appropriate port for your TBU device,
+   The default is 8888. Replace `<tbu serial channel>` with the appropriate Seriat
+   Channel for your TBU device, The default is 0.
+
+  The `<baud_rate>` is only necessary for UART And TBU devices, and defaults
    to 250000 baud if omitted.
 
 ## Flash Tool usage
@@ -122,7 +134,8 @@ with Katapult again.
 Run `scripts/flashtool.py -h` to display help:
 
 ```
-usage: flashtool.py [-h] [-d <serial device>] [-b <baud rate>] [-i <can interface>]
+usage: flashtool.py [-h] [-d <serial device>] [-a <tcp host>] [-p <tcp port>]
+                    [-c <tbu serial channel>] [-b <baud rate>] [-i <can interface>]
                     [-f <klipper.bin>] [-u <uuid>] [-q] [-v] [-r]
 
 Katapult Flash Tool
