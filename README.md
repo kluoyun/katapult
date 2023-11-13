@@ -131,6 +131,12 @@ options:
   -h, --help            show this help message and exit
   -d <serial device>, --device <serial device>
                         Serial Device
+  -a <tcp host>, --address <tcp host>
+                        TBU TCP Host or IPAddress
+  -p <tcp port>, --port <tcp port>
+                        TBU TCP port
+  -c <tbu serial channel>, --channel <tbu serial channel>
+                        TBU Serial Channel
   -b <baud rate>, --baud <baud rate>
                         Serial baud rate
   -i <can interface>, --interface <can interface>
@@ -156,6 +162,11 @@ The `-f` option defaults to `~/klipper/out/klipper.bin` when omitted.
 ### Serial Programming (USB or UART)
 
 The `-d` option is required.  The `-b` option defaults to `250000` if omitted.
+
+### Serial Programming (TBU)
+
+The `-a` option is required.  The `-b` option defaults to `250000` if omitted,
+the `-p` option defaults to '8888', and the `-c` option defaults to '0'.
 
 ### Request Bootloader (CAN Devices Only)
 

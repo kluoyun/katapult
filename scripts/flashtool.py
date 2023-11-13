@@ -563,12 +563,89 @@ class SerialSocket:
         self.serial.close()
         self.serial = None
 
+class TBUSocket:
+    def __init__(self, loop: asyncio.AbstractEventLoop):
+        self._loop = loop
+        self.serial = self.serial_error = None
+        self.node = CanNode(0, self)
+
+    def _handle_response(self) -> None:
+        try:
+            data = self.serial.recv(4096)
+        except self.serial_error as e:
+            logging.exception("Error on TBU recv")
+            self.close()
+        self.node.feed_data(data)
+
+    def send(self, can_id: int, payload: bytes = b"") -> None:
+        try:
+            self.serial.send(payload)
+        except self.serial_error as e:
+            logging.exception("Error on TBU send")
+            self.close()
+
+    async def run(self, address:str, port:int, ch:int, baud: int, fw_path: pathlib.Path) -> None:
+        if not fw_path.is_file():
+            raise FlashCanError("Invalid firmware path '%s'" % (fw_path))
+
+        self.serial_error = IOError
+        try:
+            serial_dev = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            serial_dev.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 1200) # 连接超时
+            serial_dev.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)        # 禁用Nagle算法，提高实时性
+            serial_dev.setsockopt(socket.IPPROTO_TCP, socket.TCP_CORK, 0)           # 禁用阻塞写入
+            serial_dev.setsockopt(socket.SOL_SOCKET,  socket.SO_KEEPALIVE, 1)       # 长连接保活
+            serial_dev.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 10)        # 保活重试次数
+            serial_dev.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 1)
+            serial_dev.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 1)
+            serial_dev.connect((str(address), int(port)))
+        except (OSError, IOError, self.serial_error) as e:
+            raise FlashCanError("Unable to connect to TBU: %s" % (e,))
+        
+        # 首次连接，发送设置参数，共10个字节，0x33, 0x33开头和结尾
+        # 设置参数第1位是设置类型，0x1d=设置串口并初始化, 其它保留。
+        # 第2位为此mcu指定的转换器上的串口通道
+        # 第3-6位4个字节为波特率的大端序字节
+        data = bytes([0x33, 0x33, 0x1d, int(ch)]) + struct.pack(">I", int(baud)) + bytes([0x33, 0x33])
+        serial_dev.send(data)
+        self.serial = serial_dev
+        self._loop.add_reader(self.serial.fileno(), self._handle_response)
+        flasher = CanFlasher(self.node, fw_path)
+        try:
+            await flasher.connect_btl()
+            await flasher.send_file()
+            await flasher.verify_file()
+        finally:
+            # always attempt to send the complete command. If
+            # there is an error it will exit the bootloader
+            # unless comms were broken
+            await flasher.finish()
+
+    def close(self):
+        if self.serial is None:
+            return
+        self._loop.remove_reader(self.serial.fileno())
+        self.serial.close()
+        self.serial = None
+
 def main():
     parser = argparse.ArgumentParser(
         description="Katapult Flash Tool")
     parser.add_argument(
         "-d", "--device", metavar='<serial device>',
         help="Serial Device"
+    )
+    parser.add_argument(
+        "-a", "--address", metavar='<tcp host>',
+        help="TBU TCP Host or IPAddress"
+    )
+    parser.add_argument(
+        "-p", "--port", default=8888, metavar='<tcp port>',
+        help="TBU TCP port"
+    )
+    parser.add_argument(
+        "-c", "--channel", default=0, metavar='<tbu serial channel>',
+        help="TBU Serial Channel"
     )
     parser.add_argument(
         "-b", "--baud", default=250000, metavar='<baud rate>',
@@ -605,7 +682,7 @@ def main():
     intf = args.interface
     fpath = pathlib.Path(args.firmware).expanduser().resolve()
     loop = asyncio.get_event_loop()
-    iscan = args.device is None
+    iscan = args.device is None and args.address is None
     req_only = args.request_bootloader
     sock = None
     try:
@@ -620,13 +697,12 @@ def main():
                     )
                 uuid = int(args.uuid, 16)
                 loop.run_until_complete(sock.run(intf, uuid, fpath, req_only))
-        else:
-            if args.device is None:
-                raise FlashCanError(
-                    "The 'device' option must be specified to flash a device"
-                )
+        elif args.device is not None:
             sock = SerialSocket(loop)
             loop.run_until_complete(sock.run(args.device, args.baud, fpath))
+        elif args.address is not None:
+            sock = TBUSocket(loop)
+            loop.run_until_complete(sock.run(args.address, args.port, args.channel, args.baud, fpath))
     except Exception as e:
         logging.exception("Flash Error")
         sys.exit(-1)
